@@ -5,17 +5,20 @@ use crate::{cookie_auth, env_detect, instance, launcher, AppState};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, WebviewWindow};
 
 /// 推给前端的状态事件名，前端按 payload.state 切换界面。
 const EVENT_STATE: &str = "dsh-state";
 /// 等 dsh web 打印就绪地址的最长时间。
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
+/// 启动动画最短播放时长：复用实例能秒开，也要让动画播完再切页面。
+const MIN_SPLASH: Duration = Duration::from_millis(3400);
 
 /// 启动编排主流程。
 pub fn orchestrate(app: tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else { return };
+    let splash_started = Instant::now();
 
     // 第一步：检测 dsh / npm，未安装则走自动安装流程
     emit(&window, json!({ "state": "checking" }));
@@ -42,8 +45,8 @@ pub fn orchestrate(app: tauri::AppHandle) {
 
     // 第三步：有实例就自签 cookie 复用，没有就自己起一个
     match reuse_port {
-        Some(port) => reuse_branch(&window, port),
-        None => spawn_branch(&app, &window, &dsh, &toolchain.bin_dirs),
+        Some(port) => reuse_branch(&window, port, splash_started),
+        None => spawn_branch(&app, &window, &dsh, &toolchain.bin_dirs, splash_started),
     }
 }
 
@@ -99,14 +102,14 @@ fn pick_instance(app: &tauri::AppHandle, window: &WebviewWindow, instances: &[in
 }
 
 /// 复用分支：自签 cookie 接入已在运行的实例，不起第二个进程；失败则提示用户先关闭它。
-fn reuse_branch(window: &WebviewWindow, port: u16) {
-    if let Err(error) = attach_to_instance(window, port) {
+fn reuse_branch(window: &WebviewWindow, port: u16, splash_started: Instant) {
+    if let Err(error) = attach_to_instance(window, port, splash_started) {
         emit(window, json!({ "state": "reuse_failed", "port": port, "message": error.to_string() }));
     }
 }
 
 /// 自签 cookie、验证有效性、写进窗口、加载页面。
-fn attach_to_instance(window: &WebviewWindow, port: u16) -> anyhow::Result<()> {
+fn attach_to_instance(window: &WebviewWindow, port: u16, splash_started: Instant) -> anyhow::Result<()> {
     let authority = format!("127.0.0.1:{port}");
 
     // 按 dsh 的格式自签 cookie，先用 HTTP 请求验证它被目标实例接受
@@ -126,29 +129,47 @@ fn attach_to_instance(window: &WebviewWindow, port: u16) -> anyhow::Result<()> {
         .expires(expires)
         .build();
     window.set_cookie(cookie)?;
+
+    // 复用实例能秒开：先补足启动动画的最短播放时长再切页面
+    wait_min_splash(splash_started);
     window.navigate(url::Url::parse(&format!("http://{authority}/"))?)?;
 
     Ok(())
 }
 
-/// 自起分支：启动 dsh web 子进程，登记归属后加载它打印的带凭证地址。
-fn spawn_branch(app: &tauri::AppHandle, window: &WebviewWindow, dsh: &Path, bin_dirs: &[PathBuf]) {
+/// 自起分支：启动 dsh web 子进程，登记归属后按它的端口自签 cookie 接入首页。
+fn spawn_branch(app: &tauri::AppHandle, window: &WebviewWindow, dsh: &Path, bin_dirs: &[PathBuf], splash_started: Instant) {
     eprintln!("dsh-desktop: 没有已在运行的实例，启动 dsh web 子进程");
     match launcher::spawn_and_wait_url(dsh, bin_dirs, SPAWN_TIMEOUT) {
         Ok(spawned) => {
             eprintln!("dsh-desktop: dsh web 就绪，地址 {}", spawned.url);
             // 登记子进程归属，关窗时只回收自己起的这个
             *app.state::<AppState>().owned_child.lock().unwrap() = Some(spawned.child);
-            match url::Url::parse(&spawned.url) {
-                Ok(url) => {
-                    if let Err(error) = window.navigate(url) {
-                        emit(window, json!({ "state": "error", "message": format!("加载 dsh 页面失败：{error}") }));
-                    }
-                }
-                Err(error) => emit(window, json!({ "state": "error", "message": format!("dsh 打印的地址无法解析：{error}") })),
+
+            // dsh 打印的地址要用 ?token= 换会话 cookie，而那个 Set-Cookie 带 SameSite=Strict，
+            // 窗口从状态页跨站跳过去时 WebKit 不会带上它，页面只会停在 401 文本页；
+            // 所以自起也和复用分支走同一条路：自签 cookie 写进窗口，再加载 127.0.0.1 首页
+            let Some(port) = spawned_port(&spawned.url) else {
+                emit(window, json!({ "state": "error", "message": format!("dsh 打印的就绪地址里读不出端口：{}", spawned.url) }));
+                return;
+            };
+            if let Err(error) = attach_to_instance(window, port, splash_started) {
+                emit(window, json!({ "state": "error", "message": format!("接入自起的 dsh web（127.0.0.1:{port}）失败：{error}") }));
             }
         }
         Err(error) => emit(window, json!({ "state": "error", "message": error.to_string() })),
+    }
+}
+
+/// 从 dsh 打印的就绪地址里取它监听的端口。
+fn spawned_port(ready_url: &str) -> Option<u16> {
+    url::Url::parse(ready_url).ok()?.port()
+}
+
+/// 补足启动动画的最短播放时长；已超过则立即返回。
+fn wait_min_splash(started: Instant) {
+    if let Some(remain) = MIN_SPLASH.checked_sub(started.elapsed()) {
+        std::thread::sleep(remain);
     }
 }
 

@@ -48,6 +48,10 @@ fn pick_instance(port: u16, state: tauri::State<'_, AppState>) {
     }
 }
 
+/// 注入进 webview 每个页面的初始化脚本：拦掉 WKWebView 自带的右键菜单（Back / Reload）。
+/// 状态页和 dsh 界面共用这个 webview，dsh 的界面是远端页面改不了，只能在注入层拦。
+const CONTEXT_MENU_GUARD: &str = "document.addEventListener('contextmenu', function (event) { event.preventDefault(); });";
+
 pub fn run() {
     tauri::Builder::default()
         // 桌面应用自身单实例：第二个副本启动时把已有窗口拉到前台，然后自己退出
@@ -68,6 +72,13 @@ pub fn run() {
         .setup(|app| {
             // 应用菜单（中英文按系统语言切换，含「检查更新」）
             menu::setup(app)?;
+
+            // 主窗口按 tauri.conf.json 的描述在这里建（配置里标了 create: false）：
+            // 要往 webview 注入初始化脚本，而 Tauri 只支持在建 webview 时注入，配置里没这个字段
+            let window_config = app.config().app.windows.first().cloned().expect("tauri.conf.json 里缺少主窗口配置");
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+                .initialization_script_for_all_frames(CONTEXT_MENU_GUARD)
+                .build()?;
 
             // 启动编排跑在独立线程，不阻塞窗口显示
             let handle = app.handle().clone();

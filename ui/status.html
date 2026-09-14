@@ -8,34 +8,44 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
-    background: linear-gradient(135deg, #0d1226 0%, #101736 55%, #0a0e1e 100%);
+    background: #0a0e1e;
     color: #e6e9f2;
     min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    overflow: hidden;
   }
-  .card {
-    width: 520px;
-    max-width: calc(100vw - 64px);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 40px 44px;
+
+  /* 像素启动画面画布：整页背景，不拦点击 */
+  canvas.fx {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 加载状态区：贴在像素品牌名下方，无卡片框，内容超高时内部滚动 */
+  #stage { position: fixed; inset: 0; z-index: 10; }
+  #status-area {
+    position: absolute;
+    top: calc(50% + 56px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(560px, calc(100vw - 48px));
+    max-height: calc(50vh - 76px);
+    overflow-y: auto;
     text-align: center;
   }
-  .logo { width: 72px; height: 72px; margin: 0 auto 18px; }
-  .logo img { width: 100%; height: 100%; display: block; border-radius: 16px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); }
-  .brand { font-size: 15px; color: #8b93ad; margin-bottom: 28px; letter-spacing: 1px; }
+
   h1 { font-size: 19px; font-weight: 600; margin-bottom: 12px; }
   p.desc { font-size: 14px; color: #aab1c8; line-height: 1.7; margin-bottom: 24px; }
   .hidden { display: none; }
 
   .spinner {
-    width: 34px; height: 34px;
-    margin: 6px auto 18px;
-    border: 3px solid rgba(77, 107, 254, 0.25);
-    border-top-color: #4D6BFE;
+    width: 30px; height: 30px;
+    margin: 2px auto 14px;
+    border: 3px solid rgba(255, 69, 69, 0.22);
+    border-top-color: #ff4545;
     border-radius: 50%;
     animation: spin 0.9s linear infinite;
   }
@@ -49,8 +59,8 @@
     border: 1px solid transparent;
     margin: 0 6px;
   }
-  button.primary, a.primary { background: #4D6BFE; color: #fff; }
-  button.primary:hover, a.primary:hover { background: #3d5af0; }
+  button.primary, a.primary { background: #e01830; color: #fff; }
+  button.primary:hover, a.primary:hover { background: #c41028; }
   a.btn-link {
     display: inline-block;
     font-size: 14px;
@@ -71,7 +81,7 @@
     background: rgba(0, 0, 0, 0.35);
     border-radius: 8px;
     padding: 12px 14px;
-    max-height: 260px;
+    max-height: 220px;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
@@ -96,55 +106,57 @@
 </style>
 </head>
 <body>
-<div class="card">
+<canvas id="fx" class="fx"></canvas>
 
-  <div class="logo"><img src="logo.png" alt="DeepSeek Harness"></div>
-  <div class="brand">DeepSeek Harness</div>
+<div id="stage">
+  <div id="status-area">
 
-  <section id="view-checking" class="view">
-    <div class="spinner"></div>
-    <p class="desc">正在检查运行环境…</p>
-  </section>
+    <section id="view-checking" class="view">
+      <div class="spinner"></div>
+      <p class="desc">正在检查运行环境…</p>
+    </section>
 
-  <section id="view-need-install" class="view hidden">
-    <h1>需要安装 DeepSeek Harness</h1>
-    <p class="desc">本机还没有安装 dsh 命令行工具。<br>确认后将自动执行 <span class="mono">npm i -g @deepseek-ai/dsh</span> 完成安装。</p>
-    <button id="btn-install" class="primary">自动安装</button>
-    <button id="btn-cancel-install" class="ghost">退出</button>
-  </section>
+    <section id="view-need-install" class="view hidden">
+      <h1>需要安装 DeepSeek Harness</h1>
+      <p class="desc">本机还没有安装 dsh 命令行工具。<br>确认后将自动执行 <span class="mono">npm i -g @deepseek-ai/dsh</span> 完成安装。</p>
+      <button id="btn-install" class="primary">自动安装</button>
+      <button id="btn-cancel-install" class="ghost">退出</button>
+    </section>
 
-  <section id="view-need-node" class="view hidden">
-    <h1>需要先安装 Node.js</h1>
-    <p class="desc">本机没有检测到 Node.js 环境，无法自动安装 dsh。<br>请先安装 Node.js（推荐 LTS 版本），再重新打开本应用。</p>
-    <a class="primary btn-link" href="https://nodejs.org/zh-cn/download" target="_blank">前往 nodejs.org</a>
-    <button id="btn-quit-node" class="ghost">退出</button>
-  </section>
+    <section id="view-need-node" class="view hidden">
+      <h1>需要先安装 Node.js</h1>
+      <p class="desc">本机没有检测到 Node.js 环境，无法自动安装 dsh。<br>请先安装 Node.js（推荐 LTS 版本），再重新打开本应用。</p>
+      <a class="primary btn-link" href="https://nodejs.org/zh-cn/download" target="_blank">前往 nodejs.org</a>
+      <button id="btn-quit-node" class="ghost">退出</button>
+    </section>
 
-  <section id="view-installing" class="view hidden">
-    <h1>正在安装 dsh…</h1>
-    <pre id="install-log"></pre>
-    <p class="desc">如果系统弹出密码输入框，请在终端完成授权后等待安装结束。</p>
-  </section>
+    <section id="view-installing" class="view hidden">
+      <h1>正在安装 dsh…</h1>
+      <pre id="install-log"></pre>
+      <p class="desc">如果系统弹出密码输入框，请在终端完成授权后等待安装结束。</p>
+    </section>
 
-  <section id="view-pick" class="view hidden">
-    <h1>检测到多个正在运行的 dsh</h1>
-    <p class="desc">请选择要接入的一个：</p>
-    <div id="instance-list"></div>
-  </section>
+    <section id="view-pick" class="view hidden">
+      <h1>检测到多个正在运行的 dsh</h1>
+      <p class="desc">请选择要接入的一个：</p>
+      <div id="instance-list"></div>
+    </section>
 
-  <section id="view-reuse-failed" class="view hidden">
-    <h1>无法接入已在运行的 dsh</h1>
-    <p class="desc">端口 <span class="mono" id="reuse-failed-port"></span> 上的 dsh 拒绝了接入请求<span class="mono" id="reuse-failed-reason"></span>。<br>请先在终端里关闭它，再重新打开本应用。</p>
-    <button id="btn-quit-reuse" class="primary">退出</button>
-  </section>
+    <section id="view-reuse-failed" class="view hidden">
+      <h1>无法接入已在运行的 dsh</h1>
+      <p class="desc">端口 <span class="mono" id="reuse-failed-port"></span> 上的 dsh 拒绝了接入请求<span class="mono" id="reuse-failed-reason"></span>。<br>请先在终端里关闭它，再重新打开本应用。</p>
+      <button id="btn-quit-reuse" class="primary">退出</button>
+    </section>
 
-  <section id="view-error" class="view hidden">
-    <h1>启动失败</h1>
-    <p class="desc" id="error-detail"></p>
-    <button id="btn-quit-error" class="primary">退出</button>
-  </section>
+    <section id="view-error" class="view hidden">
+      <h1>启动失败</h1>
+      <p class="desc" id="error-detail"></p>
+      <button id="btn-quit-error" class="primary">退出</button>
+    </section>
 
+  </div>
 </div>
+<script src="splash.js?v=2026091427"></script>
 <script src="status.js?v=2026091415"></script>
 </body>
 </html>
