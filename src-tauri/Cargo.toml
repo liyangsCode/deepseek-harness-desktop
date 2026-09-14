@@ -1,0 +1,33 @@
+[package]
+name = "dsh-desktop"
+version = "0.1.0"
+description = "DeepSeek Harness 桌面端"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "dsh_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+anyhow = "1"
+url = "2"
+time = "0.3"
+libc = "0.2"
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = "s"
