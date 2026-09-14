@@ -142,17 +142,18 @@ fn spawn_branch(app: &tauri::AppHandle, window: &WebviewWindow, dsh: &Path, bin_
     eprintln!("dsh-desktop: 没有已在运行的实例，启动 dsh web 子进程");
     match launcher::spawn_and_wait_url(dsh, bin_dirs, SPAWN_TIMEOUT) {
         Ok(spawned) => {
-            eprintln!("dsh-desktop: dsh web 就绪，地址 {}", spawned.url);
             // 登记子进程归属，关窗时只回收自己起的这个
             *app.state::<AppState>().owned_child.lock().unwrap() = Some(spawned.child);
 
             // dsh 打印的地址要用 ?token= 换会话 cookie，而那个 Set-Cookie 带 SameSite=Strict，
             // 窗口从状态页跨站跳过去时 WebKit 不会带上它，页面只会停在 401 文本页；
             // 所以自起也和复用分支走同一条路：自签 cookie 写进窗口，再加载 127.0.0.1 首页
+            // 那个 token 是能换会话 cookie 的凭证，日志和界面一律只留端口，不落地址原文
             let Some(port) = spawned_port(&spawned.url) else {
-                emit(window, json!({ "state": "error", "message": format!("dsh 打印的就绪地址里读不出端口：{}", spawned.url) }));
+                emit(window, json!({ "state": "error", "message": "dsh 打印的就绪地址里读不出端口（地址带登录凭证，已省略原文）" }));
                 return;
             };
+            eprintln!("dsh-desktop: dsh web 就绪，端口 {port}");
             if let Err(error) = attach_to_instance(window, port, splash_started) {
                 emit(window, json!({ "state": "error", "message": format!("接入自起的 dsh web（127.0.0.1:{port}）失败：{error}") }));
             }
