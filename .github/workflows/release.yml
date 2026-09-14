@@ -1,0 +1,59 @@
+# 打版本标签（如 v0.1.0）push 后触发：云端 Windows / macOS 机器自动构建安装包，
+# 产物以草稿形式挂到仓库 Releases 页面，人工确认后点 Publish 对外发布。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 通用包：一次构建同时含 Apple 芯片和 Intel 两种架构
+          - platform: "macos-latest"
+            args: "--target universal-apple-darwin"
+          # Windows 64 位：--bundles 覆盖 tauri.conf.json 里只适用于 mac 的 targets 配置
+          - platform: "windows-latest"
+            args: "--bundles nsis,msi"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: "npm"
+
+      # macOS 通用包需要同时装两种芯片架构的 Rust 编译目标；Windows 用默认目标即可
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # 缓存 Rust 编译产物，后续发版构建能快十几分钟
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+
+      # 安装 @tauri-apps/cli 等 devDependencies（ui 是纯静态目录，无需前端构建步骤）
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and upload release assets
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "DeepSeek Harness ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download and install this version."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
